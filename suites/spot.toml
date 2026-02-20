@@ -1,0 +1,8 @@
+task_timeout = "120s"
+parallelism = 1
+
+[[matrix]]
+label = "default"
+
+[suite_config]
+dataset_path = "datasets/spot/v1/tasks.jsonl"
