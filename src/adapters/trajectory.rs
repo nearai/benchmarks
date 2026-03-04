@@ -15,7 +15,7 @@ use crate::suite::{BenchScore, BenchSuite, BenchTask, ConversationTurn, TaskSubm
 // ---------------------------------------------------------------------------
 
 /// A multi-turn trajectory scenario loaded from a JSON file.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrajectoryScenario {
     pub name: String,
     #[serde(default)]
@@ -40,7 +40,7 @@ fn default_max_tool_iterations() -> usize {
 }
 
 /// Setup configuration for a scenario.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ScenarioSetup {
     /// Tools that should be available (restrict registry to only these).
     #[serde(default)]
@@ -54,14 +54,14 @@ pub struct ScenarioSetup {
 }
 
 /// Workspace pre-seeding configuration.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkspaceSetup {
     #[serde(default)]
     pub documents: std::collections::HashMap<String, String>,
 }
 
 /// A single turn in a trajectory scenario.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioTurn {
     pub user: String,
     #[serde(default)]
@@ -371,69 +371,6 @@ impl BenchSuite for TrajectorySuite {
             Arc::new(ironclaw::tools::builtin::ListDirTool::new()),
             Arc::new(ironclaw::tools::builtin::ApplyPatchTool::new()),
         ]
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Derive Serialize for TrajectoryScenario (needed for metadata round-trip)
-// ---------------------------------------------------------------------------
-
-// We need Serialize for storing in BenchTask.metadata and deserializing back.
-// The types above use Deserialize; add Serialize to TrajectoryScenario and deps.
-impl Serialize for TrajectoryScenario {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("TrajectoryScenario", 7)?;
-        state.serialize_field("name", &self.name)?;
-        state.serialize_field("description", &self.description)?;
-        state.serialize_field("tags", &self.tags)?;
-        state.serialize_field("setup", &self.setup)?;
-        state.serialize_field("timeout_secs", &self.timeout_secs)?;
-        state.serialize_field("max_tool_iterations", &self.max_tool_iterations)?;
-        state.serialize_field("turns", &self.turns)?;
-        state.end()
-    }
-}
-
-impl Serialize for ScenarioSetup {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("ScenarioSetup", 3)?;
-        state.serialize_field("tools", &self.tools)?;
-        state.serialize_field("identity", &self.identity)?;
-        state.serialize_field("workspace", &self.workspace)?;
-        state.end()
-    }
-}
-
-impl Serialize for WorkspaceSetup {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("WorkspaceSetup", 1)?;
-        state.serialize_field("documents", &self.documents)?;
-        state.end()
-    }
-}
-
-impl Serialize for ScenarioTurn {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("ScenarioTurn", 2)?;
-        state.serialize_field("user", &self.user)?;
-        state.serialize_field("assertions", &self.assertions)?;
-        state.end()
     }
 }
 
