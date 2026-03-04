@@ -6,6 +6,7 @@ Benchmarking harness for evaluating AI agents. Extracted from [ironclaw](https:/
 
 | Suite | Description |
 |-------|-------------|
+| `trajectory` | Multi-turn trajectory scenarios with per-turn assertions (supersedes `spot`) |
 | `spot` | End-to-end spot checks: conversation, tool use, chaining, robustness |
 | `custom` | Custom JSONL tasks with flexible scoring (exact, contains, regex, LLM) |
 | `gaia` | GAIA benchmark (knowledge and reasoning) |
@@ -15,20 +16,52 @@ Benchmarking harness for evaluating AI agents. Extracted from [ironclaw](https:/
 ## Quick Start
 
 ```bash
-# List available suites
+# 1. Configure your LLM provider (pick one)
+cp .env.example .env
+# Edit .env with your API key (OPENAI_API_KEY, ANTHROPIC_API_KEY, or LLM_* vars)
+
+# 2. List available suites
 nearai-bench list
 
-# Run spot checks with a config
-nearai-bench run --suite spot --config suites/spot.toml
+# 3. Run trajectory scenarios
+nearai-bench run --suite trajectory --config suites/trajectory.toml
 
 # Run with a specific model
-nearai-bench run --suite spot --config suites/spot.toml --model openai/gpt-4o
+nearai-bench run --suite trajectory --config suites/trajectory.toml --model gpt-4o
 
 # View latest results
 nearai-bench results latest
 
 # Compare two runs
 nearai-bench compare <baseline-uuid> <comparison-uuid>
+```
+
+## LLM Provider Setup
+
+Copy `.env.example` to `.env` and set your provider credentials. The harness
+supports any OpenAI-compatible API endpoint.
+
+**OpenAI** (simplest):
+```bash
+OPENAI_API_KEY=sk-...
+```
+
+**Anthropic**:
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**Any OpenAI-compatible provider** (OpenRouter, Together, vLLM, Ollama, etc.):
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODEL=anthropic/claude-sonnet-4
+```
+
+**NEAR AI** (requires ironclaw onboarding):
+```bash
+LLM_BACKEND=nearai
 ```
 
 ## Project Structure
