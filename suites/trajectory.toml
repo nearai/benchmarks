@@ -6,3 +6,4 @@ label = "default"
 
 [suite_config]
 dataset_path = "datasets/trajectory/v1"
+# workspace_path = "../openclaw-nearai-worker/ironclaw-worker/workspace"

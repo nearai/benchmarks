@@ -79,6 +79,35 @@ benchmarks/
     adapters/          Suite adapter implementations
 ```
 
+## Trajectory Suite
+
+The `trajectory` suite replays multi-turn conversation scenarios with per-turn assertions
+(tool selection, response content, call limits). See `datasets/trajectory/v1/` for examples.
+
+### Workspace Identity Files
+
+In production, the IronClaw agent loads identity files (`SOUL.md`, `IDENTITY.md`, `AGENTS.md`,
+`USER.md`, `TOOLS.md`) from its workspace to build the system prompt. To benchmark with the
+same system prompt as production, point `workspace_path` at the deployment repo's workspace
+directory:
+
+```toml
+[suite_config]
+dataset_path = "datasets/trajectory/v1"
+workspace_path = "../openclaw-nearai-worker/ironclaw-worker/workspace"
+```
+
+All `.md` files from that directory are loaded and seeded into a fresh in-memory workspace
+for each benchmark task. The agent's `Workspace::system_prompt()` then assembles them into
+the system prompt exactly as it would in production.
+
+Per-scenario `setup.identity` overrides in the JSON scenario files take precedence over the
+base files from `workspace_path`.
+
+**Important:** Only files explicitly provided are loaded. Unlike ironclaw's standalone app,
+the library does *not* auto-seed default identity files. If a file is missing from the
+workspace directory, it is simply absent from the system prompt — no defaults are injected.
+
 ## Datasets
 
 Datasets live under `datasets/{suite-name}/v{N}/tasks.jsonl`. The versioning scheme lets

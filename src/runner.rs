@@ -9,9 +9,12 @@ use uuid::Uuid;
 use ironclaw::agent::{Agent, AgentDeps};
 use ironclaw::channels::{ChannelManager, IncomingMessage};
 use ironclaw::config::AgentConfig;
+use ironclaw::db::libsql::LibSqlBackend;
+use ironclaw::db::Database;
 use ironclaw::llm::LlmProvider;
 use ironclaw::safety::SafetyLayer;
 use ironclaw::tools::ToolRegistry;
+use ironclaw::workspace::Workspace;
 
 use crate::channel::BenchChannel;
 use crate::config::{BenchConfig, MatrixEntry};
@@ -385,13 +388,23 @@ async fn run_task_isolated(params: TaskRunParams<'_>) -> TaskResult {
         ironclaw::agent::cost_guard::CostGuardConfig::default(),
     ));
 
+    // _tmp_db must stay alive — dropping it deletes the DB file.
+    let (workspace, _tmp_db) = match create_seeded_workspace(task).await {
+        Ok(Some((ws, tmp))) => (Some(ws), Some(tmp)),
+        Ok(None) => (None, None),
+        Err(e) => {
+            tracing::warn!("Failed to create workspace for {}: {}", task.id, e);
+            (None, None)
+        }
+    };
+
     let deps = AgentDeps {
         store: None,
         llm: instrumented.clone() as Arc<dyn LlmProvider>,
         cheap_llm: None,
         safety,
         tools,
-        workspace: None,
+        workspace,
         extension_manager: None,
         skill_registry: None,
         skills_config: ironclaw::config::SkillsConfig::default(),
@@ -533,6 +546,55 @@ fn make_error_result(
     }
 }
 
+/// Create a workspace seeded with identity files from task metadata.
+///
+/// Returns `None` if no identity files are present (no workspace needed).
+/// The `NamedTempFile` must be kept alive for the lifetime of the workspace
+/// (dropping it deletes the underlying DB file).
+async fn create_seeded_workspace(
+    task: &BenchTask,
+) -> Result<Option<(Arc<Workspace>, tempfile::NamedTempFile)>, BenchError> {
+    let identity: std::collections::HashMap<String, String> = task
+        .metadata
+        .get("setup")
+        .and_then(|s| s.get("identity"))
+        .and_then(|i| serde_json::from_value(i.clone()).ok())
+        .unwrap_or_default();
+
+    if identity.is_empty() {
+        return Ok(None);
+    }
+
+    // Use a temp file for the DB — libsql :memory: doesn't share state across connections.
+    let tmp = tempfile::NamedTempFile::new()
+        .map_err(|e| BenchError::Config(format!("failed to create temp DB file: {e}")))?;
+    let backend = LibSqlBackend::new_local(tmp.path())
+        .await
+        .map_err(|e| BenchError::Config(format!("failed to create DB: {e}")))?;
+    backend
+        .run_migrations()
+        .await
+        .map_err(|e| BenchError::Config(format!("failed to run DB migrations: {e}")))?;
+
+    let db: Arc<dyn Database> = Arc::new(backend);
+    let workspace = Workspace::new_with_db("bench-user", db);
+
+    for (filename, content) in &identity {
+        workspace
+            .write(filename, content)
+            .await
+            .map_err(|e| BenchError::Config(format!("failed to write {filename}: {e}")))?;
+    }
+
+    tracing::debug!(
+        "Seeded workspace with {} identity files: {:?}",
+        identity.len(),
+        identity.keys().collect::<Vec<_>>()
+    );
+
+    Ok(Some((Arc::new(workspace), tmp)))
+}
+
 /// Get the short git commit hash of HEAD, or "unknown" if not in a repo.
 fn git_short_hash() -> String {
     std::process::Command::new("git")
@@ -547,4 +609,69 @@ fn git_short_hash() -> String {
             }
         })
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::suite::BenchTask;
+
+    fn make_task_with_identity(
+        id: &str,
+        identity: std::collections::HashMap<String, String>,
+    ) -> BenchTask {
+        let setup = serde_json::json!({ "identity": identity });
+        BenchTask {
+            id: id.to_string(),
+            prompt: "test".to_string(),
+            context: None,
+            resources: vec![],
+            tags: vec![],
+            expected_turns: Some(1),
+            timeout: None,
+            metadata: serde_json::json!({ "setup": setup }),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_seeded_workspace_with_identity_files() {
+        let mut identity = std::collections::HashMap::new();
+        identity.insert("SOUL.md".to_string(), "Be helpful.".to_string());
+        identity.insert("IDENTITY.md".to_string(), "Name: TestBot".to_string());
+
+        let task = make_task_with_identity("test-task", identity);
+        let (ws, _tmp) = create_seeded_workspace(&task).await.unwrap().unwrap();
+
+        let prompt = ws.system_prompt().await.unwrap();
+        assert!(prompt.contains("Be helpful."), "SOUL.md content missing");
+        assert!(prompt.contains("Name: TestBot"), "IDENTITY.md content missing");
+    }
+
+    #[tokio::test]
+    async fn test_create_seeded_workspace_empty_identity() {
+        let task = make_task_with_identity("empty-task", std::collections::HashMap::new());
+        let ws = create_seeded_workspace(&task).await.unwrap();
+        assert!(ws.is_none(), "Should return None when no identity files");
+    }
+
+    #[tokio::test]
+    async fn test_create_seeded_workspace_all_identity_files() {
+        let mut identity = std::collections::HashMap::new();
+        identity.insert("AGENTS.md".to_string(), "Agent instructions here.".to_string());
+        identity.insert("SOUL.md".to_string(), "Core values here.".to_string());
+        identity.insert("USER.md".to_string(), "User context here.".to_string());
+        identity.insert("IDENTITY.md".to_string(), "Identity here.".to_string());
+        identity.insert("TOOLS.md".to_string(), "Tool notes here.".to_string());
+
+        let task = make_task_with_identity("full-task", identity);
+        let (ws, _tmp) = create_seeded_workspace(&task).await.unwrap().unwrap();
+
+        let prompt = ws.system_prompt().await.unwrap();
+        assert!(prompt.contains("Agent instructions here."));
+        assert!(prompt.contains("Core values here."));
+        assert!(prompt.contains("User context here."));
+        assert!(prompt.contains("Identity here."));
+        // TOOLS.md is stored in the workspace but not included in system_prompt()
+        // by this version of ironclaw. It's available for agent tool searches.
+    }
 }

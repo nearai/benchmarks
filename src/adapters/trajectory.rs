@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -183,14 +183,30 @@ impl TurnAssertions {
 ///
 /// Loads scenarios from a directory of JSON files (recursive). Each file describes
 /// a multi-turn conversation with setup requirements and per-turn assertions.
+///
+/// Note: ironclaw does NOT auto-seed defaults when used as a library.
+/// Only files from `workspace_path` and per-scenario `setup.identity` are loaded.
 pub struct TrajectorySuite {
     dataset_path: PathBuf,
+    /// Base identity files loaded from workspace_path (filename -> content).
+    identity_files: HashMap<String, String>,
 }
 
 impl TrajectorySuite {
-    pub fn new(dataset_path: impl Into<PathBuf>) -> Self {
+    pub fn new(dataset_path: impl Into<PathBuf>, workspace_path: Option<PathBuf>) -> Self {
+        let identity_files = workspace_path
+            .map(|wp| load_identity_files(&wp))
+            .unwrap_or_default();
+        if !identity_files.is_empty() {
+            tracing::info!(
+                "Loaded {} identity files from workspace: {:?}",
+                identity_files.len(),
+                identity_files.keys().collect::<Vec<_>>()
+            );
+        }
         Self {
             dataset_path: dataset_path.into(),
+            identity_files,
         }
     }
 
@@ -245,7 +261,13 @@ impl BenchSuite for TrajectorySuite {
         let mut tasks = Vec::new();
 
         for path in files {
-            let scenario = Self::load_scenario(&path)?;
+            let mut scenario = Self::load_scenario(&path)?;
+
+            if !self.identity_files.is_empty() {
+                let mut merged = self.identity_files.clone();
+                merged.extend(scenario.setup.identity.clone()); // scenario wins
+                scenario.setup.identity = merged;
+            }
 
             // Store the full scenario in metadata for scoring and multi-turn support.
             let metadata = serde_json::to_value(&scenario).map_err(|e| {
@@ -374,6 +396,31 @@ impl BenchSuite for TrajectorySuite {
     }
 }
 
+/// Load all `.md` files from a directory as identity files (filename -> content).
+fn load_identity_files(dir: &Path) -> HashMap<String, String> {
+    let mut files = HashMap::new();
+    if !dir.is_dir() {
+        tracing::warn!("workspace_path is not a directory: {}", dir.display());
+        return files;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        tracing::warn!("failed to read workspace_path: {}", dir.display());
+        return files;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "md") {
+            if let (Some(name), Ok(content)) = (
+                path.file_name().and_then(|n| n.to_str()),
+                std::fs::read_to_string(&path),
+            ) {
+                files.insert(name.to_string(), content);
+            }
+        }
+    }
+    files
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -498,7 +545,7 @@ mod tests {
         )
         .unwrap();
 
-        let suite = TrajectorySuite::new(dir.path());
+        let suite = TrajectorySuite::new(dir.path(), None);
         let tasks = suite.load_tasks().await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, "pick-echo-tool");
@@ -535,7 +582,7 @@ mod tests {
         )
         .unwrap();
 
-        let suite = TrajectorySuite::new(&path);
+        let suite = TrajectorySuite::new(&path, None);
         let tasks = suite.load_tasks().await.unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].expected_turns, Some(2));
@@ -565,7 +612,7 @@ mod tests {
         )
         .unwrap();
 
-        let suite = TrajectorySuite::new(&path);
+        let suite = TrajectorySuite::new(&path, None);
         let tasks = suite.load_tasks().await.unwrap();
 
         let sub = make_submission("hello world", vec!["echo"], None);
@@ -594,7 +641,7 @@ mod tests {
         )
         .unwrap();
 
-        let suite = TrajectorySuite::new(&path);
+        let suite = TrajectorySuite::new(&path, None);
         let tasks = suite.load_tasks().await.unwrap();
 
         let sub = make_submission("goodbye", vec!["shell"], None);
@@ -620,7 +667,7 @@ mod tests {
         )
         .unwrap();
 
-        let suite = TrajectorySuite::new(&path);
+        let suite = TrajectorySuite::new(&path, None);
         let tasks = suite.load_tasks().await.unwrap();
 
         // No conversation yet -> should return first turn.
@@ -652,8 +699,68 @@ mod tests {
 
     #[tokio::test]
     async fn test_nonexistent_path_errors() {
-        let suite = TrajectorySuite::new("/nonexistent/path");
+        let suite = TrajectorySuite::new("/nonexistent/path", None);
         let err = suite.load_tasks().await.unwrap_err();
         assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_load_identity_files_from_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("SOUL.md"), "Be helpful.").unwrap();
+        std::fs::write(dir.path().join("IDENTITY.md"), "Name: Bot").unwrap();
+        std::fs::write(dir.path().join("not-md.txt"), "ignored").unwrap();
+
+        let files = load_identity_files(dir.path());
+        assert_eq!(files.len(), 2);
+        assert_eq!(files["SOUL.md"], "Be helpful.");
+        assert_eq!(files["IDENTITY.md"], "Name: Bot");
+    }
+
+    #[test]
+    fn test_load_identity_files_nonexistent_dir() {
+        let files = load_identity_files(std::path::Path::new("/nonexistent"));
+        assert!(files.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_workspace_path_merges_with_scenario_identity() {
+        let ws_dir = tempfile::tempdir().unwrap();
+        std::fs::write(ws_dir.path().join("SOUL.md"), "Base soul.").unwrap();
+        std::fs::write(ws_dir.path().join("IDENTITY.md"), "Base identity.").unwrap();
+
+        let scenario_dir = tempfile::tempdir().unwrap();
+        let path = scenario_dir.path().join("test.json");
+        let mut file = std::fs::File::create(&path).unwrap();
+        // Scenario overrides SOUL.md but not IDENTITY.md
+        write!(
+            file,
+            r#"{{
+                "name": "merge-test",
+                "setup": {{
+                    "identity": {{ "SOUL.md": "Overridden soul." }}
+                }},
+                "turns": [{{
+                    "user_input": "Hello",
+                    "assertions": {{}}
+                }}]
+            }}"#
+        )
+        .unwrap();
+
+        let suite = TrajectorySuite::new(
+            scenario_dir.path(),
+            Some(ws_dir.path().to_path_buf()),
+        );
+        let tasks = suite.load_tasks().await.unwrap();
+
+        // Extract merged identity from metadata
+        let identity: HashMap<String, String> = serde_json::from_value(
+            tasks[0].metadata["setup"]["identity"].clone(),
+        )
+        .unwrap();
+
+        assert_eq!(identity["SOUL.md"], "Overridden soul.", "Scenario should override base");
+        assert_eq!(identity["IDENTITY.md"], "Base identity.", "Base should be preserved");
     }
 }
