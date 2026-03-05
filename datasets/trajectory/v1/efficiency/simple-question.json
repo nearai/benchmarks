@@ -6,7 +6,7 @@
   "max_tool_iterations": 5,
   "turns": [
     {
-      "user": "What is 2 + 2?",
+      "user_input": "What is 2 + 2?",
       "assertions": {
         "response_contains": ["4"],
         "max_tool_calls": 0

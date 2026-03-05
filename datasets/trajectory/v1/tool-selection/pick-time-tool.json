@@ -9,10 +9,10 @@
   "max_tool_iterations": 5,
   "turns": [
     {
-      "user": "What time is it right now?",
+      "user_input": "What time is it right now?",
       "assertions": {
-        "tools_called": ["time"],
-        "tools_not_called": ["shell"],
+        "tools_used": ["time"],
+        "tools_not_used": ["shell"],
         "max_tool_calls": 3
       }
     }

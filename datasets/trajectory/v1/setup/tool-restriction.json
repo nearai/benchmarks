@@ -7,10 +7,10 @@
     },
     "turns": [
         {
-            "user": "Use the echo tool to say 'restricted test'",
+            "user_input": "Use the echo tool to say 'restricted test'",
             "assertions": {
-                "tools_called": ["echo"],
-                "tools_not_called": ["time", "json", "http"],
+                "tools_used": ["echo"],
+                "tools_not_used": ["time", "json", "http"],
                 "response_contains": ["restricted test"]
             }
         }

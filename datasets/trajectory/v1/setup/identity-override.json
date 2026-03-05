@@ -9,7 +9,7 @@
     },
     "turns": [
         {
-            "user": "What is your name?",
+            "user_input": "What is your name?",
             "assertions": {
                 "response_contains": ["BenchBot"]
             }

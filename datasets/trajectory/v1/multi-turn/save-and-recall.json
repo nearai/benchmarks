@@ -9,15 +9,15 @@
   "max_tool_iterations": 10,
   "turns": [
     {
-      "user": "Save a note: Project Alpha launches on March 15th",
+      "user_input": "Save a note: Project Alpha launches on March 15th",
       "assertions": {
-        "tools_called": ["memory_write"]
+        "tools_used": ["memory_write"]
       }
     },
     {
-      "user": "When does Project Alpha launch?",
+      "user_input": "When does Project Alpha launch?",
       "assertions": {
-        "tools_called": ["memory_search"],
+        "tools_used": ["memory_search"],
         "response_contains": ["March 15"]
       }
     }

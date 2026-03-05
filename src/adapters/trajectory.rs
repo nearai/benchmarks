@@ -63,7 +63,7 @@ pub struct WorkspaceSetup {
 /// A single turn in a trajectory scenario.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScenarioTurn {
-    pub user: String,
+    pub user_input: String,
     #[serde(default)]
     pub assertions: TurnAssertions,
 }
@@ -76,9 +76,9 @@ pub struct TurnAssertions {
     #[serde(default)]
     pub response_not_contains: Vec<String>,
     #[serde(default)]
-    pub tools_called: Vec<String>,
+    pub tools_used: Vec<String>,
     #[serde(default)]
-    pub tools_not_called: Vec<String>,
+    pub tools_not_used: Vec<String>,
     #[serde(default)]
     pub response_matches: Option<String>,
     #[serde(default)]
@@ -116,21 +116,21 @@ impl TurnAssertions {
 
         let tool_set: HashSet<&str> = submission.tool_calls.iter().map(|s| s.as_str()).collect();
 
-        // tools_called
-        for tool in &self.tools_called {
+        // tools_used
+        for tool in &self.tools_used {
             total += 1;
             if tool_set.contains(tool.as_str()) {
                 passed += 1;
             } else {
-                failures.push(format!("tools_called: \"{tool}\" not called"));
+                failures.push(format!("tools_used: \"{tool}\" not called"));
             }
         }
 
-        // tools_not_called
-        for tool in &self.tools_not_called {
+        // tools_not_used
+        for tool in &self.tools_not_used {
             total += 1;
             if tool_set.contains(tool.as_str()) {
-                failures.push(format!("tools_not_called: \"{tool}\" was called"));
+                failures.push(format!("tools_not_used: \"{tool}\" was called"));
             } else {
                 passed += 1;
             }
@@ -258,7 +258,7 @@ impl BenchSuite for TrajectorySuite {
             let first_prompt = scenario
                 .turns
                 .first()
-                .map(|t| t.user.clone())
+                .map(|t| t.user_input.clone())
                 .unwrap_or_default();
 
             tasks.push(BenchTask {
@@ -354,7 +354,7 @@ impl BenchSuite for TrajectorySuite {
         // The first turn was already sent as the initial prompt.
         // Return the next turn if available.
         if user_turns_sent < scenario.turns.len() {
-            Ok(Some(scenario.turns[user_turns_sent].user.clone()))
+            Ok(Some(scenario.turns[user_turns_sent].user_input.clone()))
         } else {
             Ok(None)
         }
@@ -402,7 +402,7 @@ mod tests {
     fn test_assertions_all_pass() {
         let assertions = TurnAssertions {
             response_contains: vec!["hello".to_string()],
-            tools_called: vec!["echo".to_string()],
+            tools_used: vec!["echo".to_string()],
             max_tool_calls: Some(3),
             ..Default::default()
         };
@@ -427,7 +427,7 @@ mod tests {
     #[test]
     fn test_assertions_tools_not_called() {
         let assertions = TurnAssertions {
-            tools_not_called: vec!["shell".to_string()],
+            tools_not_used: vec!["shell".to_string()],
             ..Default::default()
         };
         let sub = make_submission("ok", vec!["shell"], None);
@@ -487,9 +487,9 @@ mod tests {
                 "timeout_secs": 30,
                 "turns": [
                     {{
-                        "user": "Use the echo tool to say hello",
+                        "user_input": "Use the echo tool to say hello",
                         "assertions": {{
-                            "tools_called": ["echo"],
+                            "tools_used": ["echo"],
                             "response_contains": ["hello"]
                         }}
                     }}
@@ -520,13 +520,13 @@ mod tests {
                 "tags": ["memory"],
                 "turns": [
                     {{
-                        "user": "Save note: Project Alpha launches March 15",
-                        "assertions": {{ "tools_called": ["memory_write"] }}
+                        "user_input": "Save note: Project Alpha launches March 15",
+                        "assertions": {{ "tools_used": ["memory_write"] }}
                     }},
                     {{
-                        "user": "When does Project Alpha launch?",
+                        "user_input": "When does Project Alpha launch?",
                         "assertions": {{
-                            "tools_called": ["memory_search"],
+                            "tools_used": ["memory_search"],
                             "response_contains": ["March 15"]
                         }}
                     }}
@@ -555,9 +555,9 @@ mod tests {
             r#"{{
                 "name": "echo-test",
                 "turns": [{{
-                    "user": "Echo hello",
+                    "user_input": "Echo hello",
                     "assertions": {{
-                        "tools_called": ["echo"],
+                        "tools_used": ["echo"],
                         "response_contains": ["hello"]
                     }}
                 }}]
@@ -584,9 +584,9 @@ mod tests {
             r#"{{
                 "name": "echo-test",
                 "turns": [{{
-                    "user": "Echo hello",
+                    "user_input": "Echo hello",
                     "assertions": {{
-                        "tools_called": ["echo"],
+                        "tools_used": ["echo"],
                         "response_contains": ["hello"]
                     }}
                 }}]
@@ -613,8 +613,8 @@ mod tests {
             r#"{{
                 "name": "two-turn",
                 "turns": [
-                    {{ "user": "First message", "assertions": {{}} }},
-                    {{ "user": "Second message", "assertions": {{}} }}
+                    {{ "user_input": "First message", "assertions": {{}} }},
+                    {{ "user_input": "Second message", "assertions": {{}} }}
                 ]
             }}"#
         )
