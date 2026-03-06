@@ -3,6 +3,7 @@ pub mod gaia;
 pub mod spot;
 pub mod swe_bench;
 pub mod tau_bench;
+pub mod trajectory;
 
 use crate::config::BenchConfig;
 use crate::error::BenchError;
@@ -15,6 +16,7 @@ pub const KNOWN_SUITES: &[(&str, &str)] = &[
     ("spot", "Spot checks (end-to-end user workflows)"),
     ("tau_bench", "Tau-bench (multi-turn tool use)"),
     ("swe_bench", "SWE-bench Pro (software engineering)"),
+    ("trajectory", "Multi-turn trajectory scenarios"),
 ];
 
 /// Create a suite adapter by name.
@@ -108,6 +110,18 @@ pub fn create_suite(name: &str, config: &BenchConfig) -> Result<Box<dyn BenchSui
                 workspace_dir,
                 use_docker,
             )))
+        }
+        "trajectory" => {
+            let dataset_path = suite_map
+                .get("dataset_path")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| {
+                    BenchError::Config(
+                        "suite_config.dataset_path is required for 'trajectory' suite".to_string(),
+                    )
+                })?;
+            Ok(Box::new(trajectory::TrajectorySuite::new(dataset_path)))
         }
         _ => {
             let available = KNOWN_SUITES

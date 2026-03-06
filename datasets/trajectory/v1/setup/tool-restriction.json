@@ -1,0 +1,19 @@
+{
+    "name": "tool-restriction-echo-only",
+    "description": "Verify that tool restriction limits available tools to only echo",
+    "tags": ["setup", "tools"],
+    "setup": {
+        "tools": ["echo"]
+    },
+    "turns": [
+        {
+            "user_input": "Use the echo tool to say 'restricted test'",
+            "assertions": {
+                "tools_used": ["echo"],
+                "tools_not_used": ["time", "json", "http"],
+                "response_contains": ["restricted test"]
+            }
+        }
+    ],
+    "timeout_secs": 60
+}

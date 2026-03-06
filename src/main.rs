@@ -168,11 +168,19 @@ async fn main() -> anyhow::Result<()> {
             // Create suite
             let bench_suite = adapters::create_suite(&suite, &bench_config)?;
 
-            // Initialize ironclaw LLM provider
+            // Bridge common API key env vars to ironclaw's config format.
+            // This lets users set OPENAI_API_KEY or ANTHROPIC_API_KEY directly
+            // instead of going through ironclaw's onboarding wizard.
+            bridge_provider_env_vars();
+
             let ironclaw_config = ironclaw::Config::from_env().await.map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to load ironclaw config: {}. Make sure .env is configured.",
-                    e
+                    "Failed to load LLM config: {e}\n\n\
+                     Set one of:\n  \
+                       OPENAI_API_KEY=sk-...           (uses OpenAI)\n  \
+                       ANTHROPIC_API_KEY=sk-ant-...    (uses Anthropic via OpenRouter)\n  \
+                       LLM_BACKEND + LLM_BASE_URL + LLM_API_KEY  (any OpenAI-compatible provider)\n\n\
+                     See .env.example for details."
                 )
             })?;
 
@@ -181,7 +189,15 @@ async fn main() -> anyhow::Result<()> {
                 session_path: ironclaw_config.llm.nearai.session_path.clone(),
             })
             .await;
-            session.ensure_authenticated().await?;
+
+            // Only require NEAR AI authentication when using the NEAR AI backend.
+            let is_nearai = matches!(
+                ironclaw_config.llm.backend,
+                ironclaw::config::LlmBackend::NearAi
+            );
+            if is_nearai {
+                session.ensure_authenticated().await?;
+            }
 
             let llm = ironclaw::llm::create_llm_provider(&ironclaw_config.llm, session)?;
             let safety = Arc::new(ironclaw::safety::SafetyLayer::new(&ironclaw_config.safety));
@@ -310,4 +326,36 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Bridge common provider env vars to ironclaw's config format.
+///
+/// If the user has set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` but has NOT
+/// already set `LLM_BACKEND`, we auto-configure ironclaw's env vars so
+/// `Config::from_env()` picks them up without needing the onboarding wizard.
+fn bridge_provider_env_vars() {
+    // Don't override if the user already configured ironclaw directly.
+    if std::env::var("LLM_BACKEND").is_ok() {
+        return;
+    }
+
+    // SAFETY: called before any threads are spawned (single-threaded main init).
+    unsafe {
+        if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+            std::env::set_var("LLM_BACKEND", "openai_compatible");
+            std::env::set_var("LLM_BASE_URL", "https://api.openai.com/v1");
+            std::env::set_var("LLM_API_KEY", &key);
+            if std::env::var("LLM_MODEL").is_err() {
+                std::env::set_var("LLM_MODEL", "gpt-4o");
+            }
+            tracing::info!("Using OpenAI provider (from OPENAI_API_KEY)");
+        } else if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+            std::env::set_var("LLM_BACKEND", "anthropic");
+            std::env::set_var("LLM_API_KEY", &key);
+            if std::env::var("LLM_MODEL").is_err() {
+                std::env::set_var("LLM_MODEL", "claude-sonnet-4-20250514");
+            }
+            tracing::info!("Using Anthropic provider (from ANTHROPIC_API_KEY)");
+        }
+    }
 }
