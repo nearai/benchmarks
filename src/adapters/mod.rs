@@ -121,7 +121,14 @@ pub fn create_suite(name: &str, config: &BenchConfig) -> Result<Box<dyn BenchSui
                         "suite_config.dataset_path is required for 'trajectory' suite".to_string(),
                     )
                 })?;
-            Ok(Box::new(trajectory::TrajectorySuite::new(dataset_path)))
+            let workspace_path = suite_map
+                .get("workspace_path")
+                .and_then(|v| v.as_str())
+                .map(std::path::PathBuf::from);
+            Ok(Box::new(trajectory::TrajectorySuite::new(
+                dataset_path,
+                workspace_path,
+            )))
         }
         _ => {
             let available = KNOWN_SUITES
